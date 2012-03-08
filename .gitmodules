@@ -1,0 +1,3 @@
+[submodule "node-simplecrawler"]
+	path = node-simplecrawler
+	url = git@github.com:cgiffard/node-simplecrawler.git
