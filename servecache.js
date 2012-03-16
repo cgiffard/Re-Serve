@@ -40,6 +40,7 @@ var server = http.createServer(function(request,response) {
 	// Function to handle the returned data from the cache
 	function handleCacheResult(cacheData) {
 		if (cacheData) {
+			console.log("CACHE HIT");
 			cacheData.getMetadata(function(error,metadata) {
 				// Possibly bad, but we send the data down with the exact same headers we sent when we got it.
 				response.writeHead(200,metadata.stateData.headers);
@@ -89,16 +90,48 @@ var server = http.createServer(function(request,response) {
 			// Try read in the file...
 			fs.readFile(cachePathTest,function(error,data) {
 				if (error) {
-					// Some URLs are kinda horrible. Fix and try again...
-					if (cacheHitURL.match(/\/\/+/)) {
-						// Fix up the URL and try again...
-						cacheHitURL = cacheHitURL.replace(/\/\/+/g,"/").replace(/^http\:\//,"http://");
-						handleCacheResult(cacheData);
+					if (cacheHitURL.match(/\/$/)) {
+						console.log("Folder hit. Redirecting to file...");
+						cacheHitURL += ".html";
+						
+						globalCache.getCacheData({
+								"url" : cacheHitURL
+							},
+							function(cacheData) {
+								handleCacheResult(cacheData);
+							}
+						);
+					} else if (cacheHitURL.match(/\/\.html$/i)) {
+						console.log("Redirected folder hit. Inflating to index.html...");
+						cacheHitURL = cacheHitURL.replace(/\/\.html$/i,"/index.html");
+						
+						globalCache.getCacheData({
+								"url" : cacheHitURL
+							},
+							function(cacheData) {
+								handleCacheResult(cacheData);
+							}
+						);
+						
 					} else {
-						response.writeHead(404);
-						response.write("Failed to locate resource. Has it been cached?");
-						response.end();
-						console.log("CACHE MISS: %s",cacheHitURL);
+						// Some URLs are kinda horrible. Fix and try again...
+						if (cacheHitURL.replace(/^http(s)?\:\/+/,"").match(/\/\/+/)) {
+							// Fix up the URL and try again...
+							cacheHitURL = cacheHitURL.replace(/\/\/+/g,"/").replace(/^http\:\//,"http://");
+						
+							globalCache.getCacheData({
+									"url" : cacheHitURL
+								},
+								function(cacheData) {
+									handleCacheResult(cacheData);
+								}
+							);
+						} else {
+							response.writeHead(404);
+							response.write("Failed to locate resource. Has it been cached?");
+							response.end();
+							console.log("CACHE MISS: %s",cacheHitURL);
+						}
 					}
 				} else {
 					// Wow, the file existed but it wasn't in the cache index.
@@ -130,10 +163,10 @@ var server = http.createServer(function(request,response) {
 							
 							// OK, we read the data correctly, as well as the metadata. We have everything
 							// we need to restore the cache item to its proper place.
-							globalCache.setCacheData(metadata,data,function() {
-								console.log("Called back from cache repair. Check again!");
-								globalCache.saveCache();
-							});
+							// globalCache.setCacheData(metadata,data,function() {
+							// 								console.log("Called back from cache repair. Check again!");
+							// 								globalCache.saveCache();
+							// 							});
 						}
 					});
 				}
