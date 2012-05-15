@@ -9,11 +9,11 @@ var SimpleCrawler = require("./node-simplecrawler"),
 
 var arguments = process.argv.slice(2),
 	switches = arguments.filter(function(arg) {
-		return !!arg.match(/^\-[a-z0-9]$/i);
+		return !!arg.match(/^\-[a-z0-9]/i);
 	});
 
 var domains = arguments.filter(function(arg) {
-		return !arg.match(/^\-[a-z0-9]$/i);
+		return !arg.match(/^\-[a-z0-9]/i);
 	});
 
 var verboseMode = false;
@@ -27,6 +27,34 @@ if (!domains.length) {
 		console.log("Using verbose mode.");
 		verboseMode = true;
 	}
+	
+	var proxyMatch;
+	var proxyData = switches.filter(function(arg) { return arg.match(/^\-P/);});
+	var usingProxy = false,
+		proxyHostname = null
+		proxyPort = null;
+	
+	if (proxyData.length) {
+		proxyData = proxyData.shift();
+		
+		if ((proxyMatch = proxyData.match(/-P([a-z0-9\.\-]+)\:(\d+)/i))) {
+			usingProxy = true;
+			proxyHostname = proxyMatch[1];
+			proxyPort = parseInt(proxyMatch[2],10);
+		} else {
+			console.error("Invalid proxy definition (%s). Proxy switch must be of the format: -Phostname:port",proxyData);
+		}
+	}
+	
+	var allowedDomains = [];
+	var allowedDomainSwitch = switches.filter(function(arg) { return arg.match(/^\-A/);});
+	allowedDomainSwitch.forEach(function(domainSwitch) {
+		var allowedDomain = null;
+		if ((allowedDomain = domainSwitch.match(/-A([a-z0-9\.\-]+)/i))) {
+			allowedDomains.push(allowedDomain[1]);
+			console.log("Specially allowing domain %s",allowedDomain[1]);
+		}
+	});
 	
 	// Single cache object for all domains/crawlers
 	globalCache = new Cache();
@@ -45,13 +73,32 @@ if (!domains.length) {
 			path = "/" + domain.split(/\//).slice(1).join("/");
 			domain = domain.split(/\//).shift();
 		}
+		
+		// Port...
+		var portMatch, port = 80;
+		if ((portMatch = domain.match(/\:(\d+)$/))) {
+			port = portMatch[1];
+			domain = domain.replace(/\:\d+$/i,"");
+		}
 
 		console.log("Crawling domain %s...",domain);
 		if (path) console.log("Scoped to path %s",path);
 		
 		// Generate the crawler.
-		var crawler = new Crawler(domain,path);
+		var crawler = new Crawler(domain,path,port);
 		crawler.cache = globalCache;
+		
+		// Set up proxy if requested
+		if (usingProxy) {
+			crawler.useProxy = true;
+			crawler.proxyHostname = proxyHostname;
+			crawler.proxyPort = proxyPort;
+			
+			console.log("Crawling domain %s through proxy: %s:%d",domain,proxyHostname,proxyPort);
+		}
+		
+		// Add allowed domains to crawler whitelist
+		crawler.domainWhitelist = allowedDomains;
 		
 		// Respect user's wishes about whether they want www preserved or not...
 		if (!domain.match(/^www\./i)) {
@@ -77,6 +124,18 @@ if (!domains.length) {
 		});
 		
 		if (verboseMode) {
+			var domainsDiscovered = [];
+			crawler.on("queueadd",function(queueItem) {
+				if (!domainsDiscovered.reduce(function(prev,cur) {
+						return prev || queueItem.domain === cur;
+					},false)) {
+					
+					domainsDiscovered.push(queueItem.domain);
+					console.log("Discovered a new domain: %s -> Linked from: %s",queueItem.domain,queueItem.referrer);
+					console.log("Is domain valid?",crawler.isDomainValid(queueItem.domain));
+				}
+			});
+			
 			crawler.on("fetchstart",function(queueItem) {
 				console.log(
 					"Crawler %s: %d/%d %d%	- Fetching %s",
